@@ -21,7 +21,7 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', 'joint_control'))
 
-from numpy.matlib import matrix, identity
+from numpy.matlib import matrix, identity, cos, sin
 
 from recognize_posture import PostureRecognitionAgent
 
@@ -36,8 +36,12 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
         self.transforms = {n: identity(4) for n in self.joint_names}
 
         # chains defines the name of chain and joints of the chain
-        self.chains = {'Head': ['HeadYaw', 'HeadPitch']
+        self.chains = {'Head': ['HeadYaw', 'HeadPitch'],
                        # YOUR CODE HERE
+                       'LeftArm':['LShoulderPitch','LShoulderRoll','LElbowYaw','LElbowRoll'],
+                       'RightArm':['RShoulderPitch','RShoulderRoll','RElbowYaw','RElbowRoll'],
+                       'LeftLeg':['LHipYawPitch','LHipRoll','LHipPitch','LKneePitch','LAnklePitch','LAnkleRoll'],
+                       'RightLeg':['RHipYawPitch','RHipRoll','RHipPitch','RKneePitch','RAnklePitch','RAnkleRoll']
                        }
 
     def think(self, perception):
@@ -54,7 +58,91 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
         '''
         T = identity(4)
         # YOUR CODE HERE
+        axis = ''
+        if joint_name in ['HeadYaw','LElbowYaw','RElbowYaw']:
+            axis = 'z'
+        elif joint_name in ['HeadPitch',
+                            'LShoulderPitch',
+                            'LHipPitch','LKneePitch','LAnklePitch',
+                            'RShoulderPitch',
+                            'RHipPitch','RKneePitch','RAnklePitch']:
+            axis = 'y'
+        elif joint_name in ['LShoulderRoll','LElbowRoll',
+                            'RShoulderRoll','RElbowRoll',
+                            'LHipRoll','LAnkleRoll',
+                            'RHipRoll','RAnkleRoll'
+                            ]:
+            axis = 'x'
+        elif joint_name in ['LHipYawPitch','RHipYawPitch']:
+            axis = 'zy'
+        else:
+            axis = 'null'
+        c= cos(joint_angle)
+        s= sin(joint_angle)
+        Tr = identity(3)
+        offsets = {
+            'HeadYaw':          ( 0.0, 0.0, 0.1265),
+            'HeadPitch':        ( 0.0, 0.0, 0.0),
+            'LShoulderPitch':   ( 0.0, 0.098,0.1),
+            'LShoulderRoll':    ( 0.0, 0.0, 0.0),
+            'LElbowYaw':        ( 0.105, 0.015, 0.0),
+            'LElbowRoll':       ( 0.0, 0.0, 0.0),
+            'RShoulderPitch':   ( 0.0, -0.098,0.1),
+            'RShoulderRoll':    ( 0.0, 0.0, 0.0),
+            'RElbowYaw':        ( 0.105,-0.015, 0.0),
+            'RElbowRoll':       ( 0.0, 0.0, 0.0),
+            'LHipYawPitch':     ( 0.0, 0.05, -0.085),
+            'LHipRoll':         ( 0.0, 0.0, 0.0),
+            'LHipPitch':        ( 0.0, 0.0, 0.0),
+            'LKneePitch':       ( 0.0, 0.0, -0.1),
+            'LAnklePitch':      ( 0.0, 0.0, -0.1029),
+            'LAnkleRoll':       ( 0.0, 0.0, 0.0),
+            'RHipYawPitch':     ( 0.0, -0.05, -0.085),
+            'RHipRoll':         ( 0.0, 0.0, 0.0),
+            'RHipPitch':        ( 0.0, 0.0, 0.0),
+            'RKneePitch':       ( 0.0, 0.0, -0.1),
+            'RAnklePitch':      ( 0.0, 0.0, -0.1029),
+            'RAnkleRoll':       ( 0.0, 0.0, 0.0)
+        }  
+        offx,offy,offz = offsets[joint_name]
+        match axis:
+            case 'z':
+                Tr = matrix([
+                    [ c,-s, 0],
+                    [ s, c, 0],
+                    [ 0, 0, 1]
+                ])
+            case 'y':
+                Tr = matrix([
+                    [ c, 0, s],
+                    [ 0, 1, 0],
+                    [-s, 0, c]
+                ])
+            case 'x':
+                Tr = matrix([
+                    [ 1, 0, 0],
+                    [ 0, c,-s],
+                    [ 0, s, c]
+                ])
+            case 'zy':
+                Tr = matrix([
+                    [ c,-s, 0],
+                    [ s, c, 0],
+                    [ 0, 0, 1]
+                ]) * matrix([
+                    [ c, 0, s],
+                    [ 0, 1, 0],
+                    [-s, 0, c],
+                ])
+            case _:
+                Tr = identity(3)
 
+        T = matrix([
+            [Tr[0,0],Tr[0,1],Tr[0,2],offx],
+            [Tr[1,0],Tr[1,1],Tr[1,2],offy],
+            [Tr[2,0],Tr[2,1],Tr[2,2],offz],
+            [ 0,    0,  0,  1]
+        ])    
         return T
 
     def forward_kinematics(self, joints):
@@ -68,7 +156,7 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
                 angle = joints[joint]
                 Tl = self.local_trans(joint, angle)
                 # YOUR CODE HERE
-
+                T = T*Tl
                 self.transforms[joint] = T
 
 if __name__ == '__main__':
