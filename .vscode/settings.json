@@ -1,6 +1,7 @@
 {
     "python.analysis.extraPaths": [
         "./software_installation",
-        "./joint_control"
+        "./joint_control",
+        "./kinematics"
     ]
 }
