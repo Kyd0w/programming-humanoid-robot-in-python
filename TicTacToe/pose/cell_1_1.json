@@ -1,0 +1,10 @@
+{
+  "duration": 1.0,
+  "joints": {
+    "RShoulderPitch": 1.1,
+    "RShoulderRoll": -0.15,
+    "RElbowYaw": 1.2,
+    "RElbowRoll": 0.55,
+    "RWristYaw": 0.0
+  }
+}

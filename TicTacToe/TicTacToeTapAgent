@@ -1,0 +1,150 @@
+import os
+import json
+import sys
+
+# Repo root hinzufügen (damit "pid.py" gefunden wird)
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT_DIR)
+
+from pid import PIDAgent
+
+BASE_DIR = os.path.dirname(__file__)
+POSE_DIR = os.path.join(BASE_DIR, "pose")
+CMD_DIR  = os.path.join(BASE_DIR, "commands")
+CMD_PATH = os.path.join(CMD_DIR, "command.json")
+
+
+class TicTacToeTapAgent(PIDAgent):
+    """
+    Isoliertes Modul: wartet auf Commands in commands/command.json
+
+    Command-Beispiel:
+    {
+      "id": 1,
+      "type": "tap",
+      "row": 1,
+      "col": 1,
+      "say": "Center!"
+    }
+    row/col sind 0..2
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.state = "idle"
+        self.queue = []
+        self.current = None
+        self.clip_end_time = 0.0
+
+        self.last_command_id = -1
+        self.last_poll_time = 0.0
+
+        os.makedirs(CMD_DIR, exist_ok=True)
+
+    #Pose loading 
+    def load_pose(self, filename):
+        path = os.path.join(POSE_DIR, filename)
+        print("LOAD POSE:", path)
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    #Planning 
+    def enqueue_tap(self, row, col):
+        self.queue.extend([
+            self.load_pose(f"cell_{row}_{col}.json"),
+            self.load_pose("tap_down.json"),
+            self.load_pose("tap_up.json"),
+            self.load_pose(f"cell_{row}_{col}.json"),
+        ])
+        self.state = "playing"
+        self.current = None
+
+    #Command interface
+    def poll_command(self, perception, interval=0.2):
+        t = float(getattr(perception, "time", 0.0))
+        if t - self.last_poll_time < interval:
+            return None
+        self.last_poll_time = t
+
+        if not os.path.exists(CMD_PATH):
+            return None
+
+        try:
+            with open(CMD_PATH, "r", encoding="utf-8") as f:
+                cmd = json.load(f)
+        except Exception:
+            return None
+
+        cmd_id = int(cmd.get("id", -1))
+        if cmd_id == self.last_command_id:
+            return None
+
+        self.last_command_id = cmd_id
+        return cmd
+
+    def handle_command(self, cmd):
+        if cmd.get("type") == "tap":
+            row = max(0, min(2, int(cmd.get("row", 0))))
+            col = max(0, min(2, int(cmd.get("col", 0))))
+            self.enqueue_tap(row, col)
+
+            if "Console Output" in cmd:
+                print("Console Output:", cmd["say"])
+
+        elif cmd.get("type") == "clear":
+            self.queue.clear()
+            self.current = None
+            self.state = "idle"
+
+    #Clip execution 
+    def start_pose_clip(self, pose_dict, perception):
+        duration = float(pose_dict.get("duration", 0.5))
+        joints = pose_dict.get("joints", {})
+
+        for j, ang in joints.items():
+            self.target_joints[j] = float(ang)
+
+        self.clip_end_time = float(perception.time) + duration
+
+    def clip_finished(self, perception):
+        return float(perception.time) >= self.clip_end_time
+
+    #Main loop
+    def think(self, perception):
+        
+        if not hasattr(self, "target_joints"):
+            self.target_joints = {}
+        if not self.target_joints:
+            for j, a in perception.joint.items():
+                self.target_joints[j] = a
+
+        if self.state == "idle":
+            cmd = self.poll_command(perception)
+            if cmd:
+                self.handle_command(cmd)
+
+        if self.state == "playing":
+            if self.current is None:
+                if not self.queue:
+                    self.state = "idle"
+                else:
+                    self.current = self.queue.pop(0)
+                    self.start_pose_clip(self.current, perception)
+            elif self.clip_finished(perception):
+                self.current = None
+
+        action = super().think(perception)
+        action.stiffness = {j: 1.0 for j in self.joint_names}
+        return action
+
+
+if __name__ == "__main__":
+    agent = TicTacToeTapAgent(
+        simspark_ip="localhost",
+        simspark_port=3100,
+        teamname="DAInamite",
+        player_id=0,
+        sync_mode=True
+    )
+    agent.run()
